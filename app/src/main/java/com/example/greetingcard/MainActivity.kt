@@ -2,10 +2,14 @@ package com.example.greetingcard
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -35,6 +39,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.lang.IllegalStateException
 
 class MainActivity : ComponentActivity() {
     private var mediaRecorder: MediaRecorder? = null
@@ -64,6 +69,16 @@ class MainActivity : ComponentActivity() {
 
     private fun checkPermissionsAndRecord() {
         when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                if (Environment.isExternalStorageManager()) {
+                    startRecording()
+                } else {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                }
+            }
             ContextCompat.checkSelfPermission(
                 this, Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED -> {
@@ -83,13 +98,17 @@ class MainActivity : ComponentActivity() {
             outputFileUri?.let { uri ->
                 mediaRecorder = MediaRecorder().apply {
                     setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setOutputFormat(MediaRecorder.OutputFormat.DEFAULT)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                     setOutputFile(contentResolver.openFileDescriptor(uri, "w")?.fileDescriptor)
                     try {
                         prepare()
                     } catch (e: IOException) {
                         e.printStackTrace()
+                        Toast.makeText(this@MainActivity, "Failed to prepare MediaRecorder", Toast.LENGTH_SHORT).show()
+                    } catch (e: IllegalStateException) {
+                        e.printStackTrace()
+                        Toast.makeText(this@MainActivity, "MediaRecorder start called in an invalid state", Toast.LENGTH_SHORT).show()
                     }
                     start()
                 }
@@ -103,6 +122,7 @@ class MainActivity : ComponentActivity() {
         try {
             mediaRecorder?.apply {
                 stop()
+                reset()
                 release()
             }
             isRecording = false
@@ -128,7 +148,7 @@ class MainActivity : ComponentActivity() {
             parcelFileDescriptor?.let {
                 val fileDescriptor = it.fileDescriptor
                 val inputStream = FileInputStream(fileDescriptor)
-                val tempFile = File(cacheDir, "temp_audio_file.wav")
+                val tempFile = File(cacheDir, "temp_audio_file.m4a")
                 val outputStream = FileOutputStream(tempFile)
                 inputStream.use { input ->
                     outputStream.use { output ->
@@ -142,15 +162,12 @@ class MainActivity : ComponentActivity() {
             e.printStackTrace()
             null
         }
-
-
-        
     }
 
     private fun createAudioFileUri(): Uri? {
         val contentValues = ContentValues().apply {
-            put(MediaStore.Audio.Media.DISPLAY_NAME, "recording_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.wav")
-            put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+            put(MediaStore.Audio.Media.DISPLAY_NAME, "recording_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.m4a")
+            put(MediaStore.Audio.Media.MIME_TYPE, "audio/m4a")
             put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/Recordings")
         }
 
@@ -185,7 +202,7 @@ private fun transcribeAudio(audioFile: File) {
     println(audioFile)
 
     val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
-        .addFormDataPart("file", "audio.wav", audioFile.asRequestBody("audio/wav".toMediaTypeOrNull()))
+        .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/m4a".toMediaTypeOrNull()))
         .addFormDataPart("model", "whisper-1")
         .build()
 
@@ -201,6 +218,7 @@ private fun transcribeAudio(audioFile: File) {
             val response = client.newCall(request).execute()
             if (response.isSuccessful) {
                 val responseBody = response.body?.string()
+                println("responseBody")
                 println(responseBody)
             } else {
                 println("Response code: ${response.code}")
