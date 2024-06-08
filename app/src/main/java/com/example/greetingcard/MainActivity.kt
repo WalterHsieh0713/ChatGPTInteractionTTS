@@ -33,6 +33,7 @@ import kotlinx.coroutines.CoroutineScope
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -193,40 +194,107 @@ class MainActivity : ComponentActivity() {
             GreetingWithButton(name = "Android", onButtonClick = {})
         }
     }
-}
+    private fun handleTranscriptionResponse(responseBody: String) {
+        // Parse the response and extract the transcribed text
+        val transcribedText = parseTranscribedText(responseBody)
 
-private fun transcribeAudio(audioFile: File) {
-    val client = OkHttpClient()
+        // Send the transcribed text to the ChatGPT API and get the response
+        getChatGPTResponse(transcribedText) { chatGPTResponse ->
+            // Print the ChatGPT response in the log
+            println("ChatGPT Response: $chatGPTResponse")
+        }
+    }
 
-    println("audioFile")
-    println(audioFile)
+    private fun parseTranscribedText(responseBody: String): String {
+        // Implement parsing logic to extract the transcribed text from the API response
+        // Assuming the response is in JSON format: {"text": "Transcribed text goes here"}
+        val jsonObject = JSONObject(responseBody)
+        return jsonObject.getString("text")
+    }
 
-    val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
-        .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/m4a".toMediaTypeOrNull()))
-        .addFormDataPart("model", "whisper-1")
-        .build()
+    private fun getChatGPTResponse(transcribedText: String, onResponse: (String) -> Unit) {
+        val client = OkHttpClient()
 
-    val request = Request.Builder()
-        .url("https://api.openai.com/v1/audio/transcriptions")
-        .addHeader("Authorization", "Bearer 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")
-        .post(requestBody)
-        .build()
+        val requestBody = RequestBody.create(
+            "application/json".toMediaTypeOrNull(),
+            "{\"model\": \"gpt-3.5-turbo\", \"messages\": [{\"role\": \"user\", \"content\": \"$transcribedText\"}]}"
+        )
 
-    val clientScope = CoroutineScope(Dispatchers.IO)
-    clientScope.launch {
-        try {
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val responseBody = response.body?.string()
-                println("responseBody")
-                println(responseBody)
-            } else {
-                println("Response code: ${response.code}")
-                println("Response message: ${response.message}")
-                response.body?.string()?.let { println("Response body: $it") }
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/chat/completions")
+            .addHeader("Authorization", "Bearer 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")
+            .post(requestBody)
+            .build()
+
+        val clientScope = CoroutineScope(Dispatchers.IO)
+        clientScope.launch {
+            try {
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string()
+                    responseBody?.let { parseAndHandleChatGPTResponse(it, onResponse) }
+                } else {
+                    println("Response code: ${response.code}")
+                    println("Response message: ${response.message}")
+                    response.body?.string()?.let { println("Response body: $it") }
+                }
+            } catch (e: IOException) {
+                println("IOException: ${e.message}")
             }
-        } catch (e: IOException) {
-            println("IOException: ${e.message}")
+        }
+    }
+
+    private fun parseAndHandleChatGPTResponse(responseBody: String, onResponse: (String) -> Unit) {
+        // Implement parsing logic to extract the generated text from the API response
+        val generatedText = parseGeneratedText(responseBody)
+        onResponse(generatedText)
+    }
+
+    private fun parseGeneratedText(responseBody: String): String {
+        // Implement parsing logic to extract the generated text from the API response
+        // Assuming the response is in JSON format: {"choices": [{"message": {"content": "Generated text goes here"}}]}
+        val jsonObject = JSONObject(responseBody)
+        val choices = jsonObject.getJSONArray("choices")
+        val firstChoice = choices.getJSONObject(0)
+        val message = firstChoice.getJSONObject("message")
+        return message.getString("content")
+    }
+    private fun transcribeAudio(audioFile: File) {
+        val client = OkHttpClient()
+
+        println("audioFile")
+        println(audioFile)
+
+        val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/m4a".toMediaTypeOrNull()))
+            .addFormDataPart("model", "whisper-1")
+            .build()
+
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/audio/transcriptions")
+            .addHeader("Authorization", "Bearer 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")
+            .post(requestBody)
+            .build()
+
+        val clientScope = CoroutineScope(Dispatchers.IO)
+        clientScope.launch {
+            try {
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string()
+                    println("responseBody")
+                    println(responseBody)
+                    handleTranscriptionResponse(responseBody ?: "Failed to generate response")
+                } else {
+                    println("Response code: ${response.code}")
+                    println("Response message: ${response.message}")
+                    response.body?.string()?.let { println("Response body: $it") }
+                }
+            } catch (e: IOException) {
+                println("IOException: ${e.message}")
+            }
         }
     }
 }
+
+
