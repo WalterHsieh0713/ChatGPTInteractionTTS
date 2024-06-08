@@ -28,6 +28,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.content.ContextCompat
 import com.example.greetingcard.ui.theme.GreetingCardTheme
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +50,8 @@ class MainActivity : ComponentActivity() {
     private var mediaRecorder: MediaRecorder? = null
     private var isRecording: Boolean = false
     private var outputFileUri: Uri? = null
+    private var isChatGPTLoading by mutableStateOf(false)
+
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -63,7 +68,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             GreetingCardTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    GreetingWithButton(name = "Android", onButtonClick = { checkPermissionsAndRecord() })
+                    GreetingWithButton(onButtonClick = { checkPermissionsAndRecord() }, isChatGPTLoading)
                 }
             }
         }
@@ -177,28 +182,35 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun GreetingWithButton(name: String, onButtonClick: () -> Unit, modifier: Modifier = Modifier) {
+    fun GreetingWithButton(
+        onButtonClick: () -> Unit,
+        isChatGPTLoading: Boolean, // New parameter to track ChatGPT loading state
+    ) {
         Box(
-            modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Button(onClick = onButtonClick) {
-                Text(text = "Hello $name!")
+            Button(
+                onClick = onButtonClick,
+                enabled = !isChatGPTLoading // Disable button when ChatGPT is loading
+            ) {
+                // Set button text based on ChatGPT loading state
+                Text(text = if (isChatGPTLoading) "Thinking..." else "Start Recording")
             }
         }
     }
+
 
     @Preview(showBackground = true)
     @Composable
     fun GreetingWithButtonPreview() {
         GreetingCardTheme {
-            GreetingWithButton(name = "Android", onButtonClick = {})
+            GreetingWithButton(onButtonClick = {}, false)
         }
     }
     private fun handleTranscriptionResponse(responseBody: String) {
         // Parse the response and extract the transcribed text
         val transcribedText = parseTranscribedText(responseBody)
-
+        isChatGPTLoading = false
         // Send the transcribed text to the ChatGPT API and get the response
         getChatGPTResponse(transcribedText) { chatGPTResponse ->
             // Print the ChatGPT response in the log
@@ -215,6 +227,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun getChatGPTResponse(transcribedText: String, onResponse: (String) -> Unit) {
+        isChatGPTLoading = true
         val client = OkHttpClient()
 
         val requestBody = RequestBody.create(
@@ -348,9 +361,15 @@ class MainActivity : ComponentActivity() {
         }
 
         val mediaPlayer = MediaPlayer()
-        mediaPlayer.setDataSource(audioFile.absolutePath)
-        mediaPlayer.prepare()
-        mediaPlayer.start()
+        mediaPlayer.apply {
+            setDataSource(audioFile.absolutePath)
+            prepare()
+            start()
+            setOnCompletionListener {
+                // Handle completion here, such as changing button text back to original
+                isChatGPTLoading = false
+            }
+        }
     }
 }
 
