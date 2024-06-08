@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
@@ -202,6 +203,7 @@ class MainActivity : ComponentActivity() {
         getChatGPTResponse(transcribedText) { chatGPTResponse ->
             // Print the ChatGPT response in the log
             println("ChatGPT Response: $chatGPTResponse")
+            textToSpeechOpenAI(chatGPTResponse)
         }
     }
 
@@ -294,6 +296,61 @@ class MainActivity : ComponentActivity() {
                 println("IOException: ${e.message}")
             }
         }
+    }
+    private fun textToSpeechOpenAI(text: String) {
+        val client = OkHttpClient()
+
+        // Properly formatted JSON string
+        val jsonPayload = """
+        {
+            "model": "tts-1",
+            "input": "$text",
+            "voice": "alloy"
+        }
+    """.trimIndent()
+
+        // Create the request body with the correct media type
+            val requestBody = RequestBody.create(
+                "application/json".toMediaTypeOrNull(),
+                jsonPayload
+            )
+
+            val request = Request.Builder()
+                .url("https://api.openai.com/v1/audio/speech")
+                .addHeader("Authorization", "Bearer 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")
+                .post(requestBody)
+                .build()
+
+        val clientScope = CoroutineScope(Dispatchers.IO)
+        clientScope.launch {
+            try {
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val audioResponseBody = response.body?.bytes()
+                    audioResponseBody?.let {
+                        playAudio(it)
+                    }
+                } else {
+                    println("Response code: ${response.code}")
+                    println("Response message: ${response.message}")
+                    response.body?.string()?.let { println("Response body: $it") }
+                }
+            } catch (e: IOException) {
+                println("IOException: ${e.message}")
+            }
+        }
+    }
+
+    private fun playAudio(audioBytes: ByteArray) {
+        val audioFile = File.createTempFile("tts_audio", ".mp3", cacheDir)
+        FileOutputStream(audioFile).use {
+            it.write(audioBytes)
+        }
+
+        val mediaPlayer = MediaPlayer()
+        mediaPlayer.setDataSource(audioFile.absolutePath)
+        mediaPlayer.prepare()
+        mediaPlayer.start()
     }
 }
 
